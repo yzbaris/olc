@@ -1,6 +1,9 @@
 const std = @import("std");
 const rl = @import("raylib");
 const loader = @import("loader.zig");
+const common = @import("common.zig");
+
+const Vec2 = common.Vec2;
 
 const SPREADSHEET_PATH = "assets/round.png";
 const SPREADSHEET_DESC_PATH = "assets/round.xml";
@@ -50,7 +53,7 @@ const Sprite = struct {
     rect: rl.Rectangle,
     origin: rl.Vector2 = rl.Vector2.zero(),
     rotation: f32 = 0,
-    scale: f32 = 1,
+    scale: f32 = 0.5,
     source_sheet: *SpriteSheet,
 
     pub fn init(rect: rl.Rectangle, source: *SpriteSheet) Sprite {
@@ -60,13 +63,13 @@ const Sprite = struct {
         };
     }
 
-    pub fn render(self: *Sprite, posx: f32, posy: f32) void {
+    pub fn render(self: *Sprite, pos: Vec2) void {
         rl.drawTexturePro(
             self.source_sheet.texture,
             self.rect,
             rl.Rectangle{
-                .x = posx,
-                .y = posy,
+                .x = pos.x,
+                .y = pos.y,
                 .width = self.rect.width * self.scale,
                 .height = self.rect.height * self.scale,
             },
@@ -80,11 +83,17 @@ const Sprite = struct {
 const Animal = struct {
     kind: AnimalKind,
     sprite: Sprite,
-    posx: f32 = 0,
-    posy: f32 = 0,
+    pos: Vec2 = .zero(),
+    dir: Vec2 = .zero(),
+    speed: f32 = 0,
+    is_controlled_by_pl: bool = false,
 
     pub fn init(kind: AnimalKind, sheet: *SpriteSheet) !Animal {
         return .{ .kind = kind, .sprite = .init(try sheet.get_rect(kind), sheet) };
+    }
+
+    pub fn update(self: *Animal) void {
+        self.pos = self.pos.add(self.dir.mult(self.speed));
     }
 
     pub fn render(self: *Animal) void {
@@ -94,13 +103,15 @@ const Animal = struct {
 
 const Game = struct {
     allocator: std.mem.Allocator,
+    random: std.Random,
     _next_id: i32,
     animals: std.AutoHashMap(i32, Animal),
     spritesheet: SpriteSheet,
 
-    pub fn load(allocator: std.mem.Allocator, io: std.Io) !Game {
+    pub fn load(allocator: std.mem.Allocator, io: std.Io, random: std.Random) !Game {
         return .{
             .allocator = allocator,
+            .random = random,
             .animals = .init(allocator),
             .spritesheet = try SpriteSheet.load(allocator, io),
             ._next_id = 1,
@@ -126,7 +137,17 @@ const Game = struct {
     }
 
     pub fn get_animal(self: *Game, id: i32) !*Animal {
-        return try self.animals.get(id) orelse return error.AnimalNotExist;
+        return self.animals.getPtr(id) orelse return error.AnimalNotExist;
+    }
+
+    pub fn controll_non_pl_animals(self: *Game) void {
+        var iter = self.animals.valueIterator();
+
+        while (iter.next()) |animal| {
+            if (animal.is_controlled_by_pl) continue;
+
+            //TODO:
+        }
     }
 };
 
@@ -134,14 +155,18 @@ pub fn main(init: std.process.Init) anyerror!void {
     const allocator = init.gpa;
 
     const screenWidth = 800;
-    const screenHeight = 450;
+    const screenHeight = 600;
 
-    rl.initWindow(screenWidth, screenHeight, "raylib-zig [core] example - basic window");
+    rl.initWindow(screenWidth, screenHeight, "Animal Framing");
     defer rl.closeWindow();
 
     rl.setTargetFPS(60);
 
-    var game: Game = try .load(allocator, init.io);
+    var random_source: std.Random.IoSource = .{
+        .io = init.io,
+    };
+
+    var game: Game = try .load(allocator, init.io, random_source.interface());
     defer game.deinit();
 
     inline for (std.meta.tags(AnimalKind)) |kind| {
@@ -151,21 +176,49 @@ pub fn main(init: std.process.Init) anyerror!void {
     var iter = game.animals.valueIterator();
     var padding: f32 = 0;
     while (iter.next()) |animal| {
-        animal.posx += padding;
-        animal.posy += padding;
+        animal.pos = .init(padding, padding);
         padding += 30;
     }
 
+    const player_id = 1;
+
+    const player_animal = try game.get_animal(player_id);
+    player_animal.is_controlled_by_pl = true;
+
     while (!rl.windowShouldClose()) {
+        var update_iter = game.animals.valueIterator();
+
+        handle_control(player_animal);
+        while (update_iter.next()) |animal| {
+            animal.update();
+        }
+
         rl.beginDrawing();
         defer rl.endDrawing();
 
         rl.clearBackground(.blue);
 
-        var animal_iter = game.animals.valueIterator();
-
-        while (animal_iter.next()) |animal| {
+        var render_iter = game.animals.valueIterator();
+        while (render_iter.next()) |animal| {
             animal.render();
         }
+    }
+}
+
+fn handle_control(animal: *Animal) void {
+    if (rl.isKeyDown(.w)) {
+        animal.dir.sety(-1);
+    }
+
+    if (rl.isKeyDown(.s)) {
+        animal.dir.sety(1);
+    }
+
+    if (rl.isKeyDown(.a)) {
+        animal.dir.setx(-1);
+    }
+
+    if (rl.isKeyDown(.d)) {
+        animal.dir.setx(1);
     }
 }
