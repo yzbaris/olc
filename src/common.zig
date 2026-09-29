@@ -1,3 +1,6 @@
+const std = @import("std");
+const rl = @import("raylib");
+
 pub const Vec2 = struct {
     x: f32,
     y: f32,
@@ -6,12 +9,25 @@ pub const Vec2 = struct {
         return .{ .x = x, .y = y };
     }
 
+    pub fn format(
+        self: Vec2,
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        try writer.print("Vec2{{ x: {}, y: {} }}", .{ self.x, self.y });
+    }
+
     pub fn zero() Vec2 {
         return .{ .x = 0, .y = 0 };
     }
 
     pub fn length(self: Vec2) f32 {
         return @sqrt(self.x * self.x + self.y * self.y);
+    }
+
+    pub fn dist(self: Vec2, other: Vec2) f32 {
+        return other.sub(self).length();
     }
 
     pub fn normalized(self: Vec2) Vec2 {
@@ -37,8 +53,8 @@ pub const Vec2 = struct {
         return .init(self.x * amount, self.y * amount);
     }
 
-    pub fn dot(self: Vec2, other: *Vec2) Vec2 {
-        return .init(self.x * other.x, self.y * other.y);
+    pub fn dot(self: Vec2, other: Vec2) f32 {
+        return self.x * other.x + self.y * other.y;
     }
 
     pub fn eq(self: Vec2, other: Vec2) bool {
@@ -63,6 +79,14 @@ pub const Vec2 = struct {
 
     pub fn addy(self: *Vec2, value: f32) void {
         self.y += value;
+    }
+
+    pub fn from_rl(rl_vec: rl.Vector2) Vec2 {
+        return .init(rl_vec.x, rl_vec.y);
+    }
+
+    pub fn to_rl(self: Vec2) rl.Vector2 {
+        return .init(self.x, self.y);
     }
 
     pub fn move_toward(source: Vec2, target: Vec2, delta: f32) Vec2 {

@@ -51,15 +51,18 @@ const SpriteSheet = struct {
 
 const Sprite = struct {
     rect: rl.Rectangle,
-    origin: rl.Vector2 = rl.Vector2.zero(),
+    _origin: Vec2 = .zero(),
     rotation: f32 = 0,
     scale: f32 = 0.5,
     source_sheet: *SpriteSheet,
+    _collision_rad: f32,
 
     pub fn init(rect: rl.Rectangle, source: *SpriteSheet) Sprite {
         return .{
             .rect = rect,
             .source_sheet = source,
+            ._collision_rad = @min(rect.height, rect.width) / 2,
+            ._origin = .init(rect.width / 2, rect.height / 2),
         };
     }
 
@@ -67,16 +70,28 @@ const Sprite = struct {
         rl.drawTexturePro(
             self.source_sheet.texture,
             self.rect,
-            rl.Rectangle{
-                .x = pos.x,
-                .y = pos.y,
-                .width = self.rect.width * self.scale,
-                .height = self.rect.height * self.scale,
-            },
-            self.origin,
+            self.get_target_rect(pos),
+            self.get_origin().to_rl(),
             self.rotation,
             rl.Color.white,
         );
+    }
+
+    pub fn get_target_rect(self: *Sprite, pos: Vec2) rl.Rectangle {
+        return rl.Rectangle{
+            .x = pos.x,
+            .y = pos.y,
+            .width = self.rect.width * self.scale,
+            .height = self.rect.height * self.scale,
+        };
+    }
+
+    pub fn get_origin(self: *Sprite) Vec2 {
+        return self._origin.scale(self.scale);
+    }
+
+    pub fn get_collision_rad(self: *Sprite) f32 {
+        return self._collision_rad * self.scale;
     }
 };
 
@@ -95,12 +110,16 @@ const Animal = struct {
     dir: Vec2 = .zero(),
     speed: f32 = 0,
     props: AnimalProperties = .{},
+    is_colliding: bool = false,
+    is_player_controlled: bool = false,
 
     pub fn init(kind: AnimalKind, id: i32, sheet: *SpriteSheet) !Animal {
         return .{ .kind = kind, .id = id, .sprite = .init(try sheet.get_rect(kind), sheet) };
     }
 
     pub fn update(self: *Animal, dt: f32) void {
+        if (self.is_colliding) return;
+
         if (self.dir.is_zero()) {
             self.velocity = Vec2.move_toward(self.velocity, .zero(), self.props.deacc * dt);
         } else {
@@ -112,12 +131,30 @@ const Animal = struct {
     pub fn render(self: *Animal) void {
         self.sprite.render(self.pos);
     }
+
+    pub fn check_collision(self: *Animal, other: *Animal) bool {
+        if (self.id == other.id) return false;
+
+        const combined = self.sprite.get_collision_rad() + other.sprite.get_collision_rad();
+        const distance = self.pos.dist(other.pos);
+
+        if (distance < combined) {
+            const dir_away = self.pos.sub(other.pos).normalized();
+            if (self.dir.dot(dir_away) <= 0.0) {
+                self.velocity = .zero();
+                return true;
+            }
+        }
+
+        return false;
+    }
 };
 
 const PlayerController = struct {
     animal: *Animal,
 
     pub fn init(animal: *Animal) PlayerController {
+        animal.is_player_controlled = true;
         return .{ .animal = animal };
     }
 
@@ -165,7 +202,7 @@ const AIController = struct {
     pub fn update(self: *AIController, _: f32) void {
         const curr_time = rl.getTime();
         for (self.controlleds.items) |*controlled| {
-            if (curr_time >= controlled._next_check_time) {
+            if (controlled.animal.is_colliding or curr_time >= controlled._next_check_time) {
                 const dirx: f32 = @floatFromInt(self.rand.intRangeAtMost(i32, -1, 1));
                 const diry: f32 = @floatFromInt(self.rand.intRangeAtMost(i32, -1, 1));
                 controlled.animal.dir = .init(dirx, diry);
@@ -183,6 +220,7 @@ const Game = struct {
     spritesheet: SpriteSheet,
     player: PlayerController,
     ai_controller: AIController,
+    debug: bool = false,
 
     pub fn load(allocator: std.mem.Allocator, io: std.Io, rand: std.Random) !Game {
         return .{
@@ -204,15 +242,16 @@ const Game = struct {
         const player_id = 1;
 
         var iter = self.animals.valueIterator();
-        var padding: f32 = 0;
+        var padding: f32 = 50;
         while (iter.next()) |animal| {
             if (animal.id == player_id) {
-                self.player.animal = try self.get_animal(player_id);
+                self.player = .init(try self.get_animal(player_id));
+                animal.pos = .init(400, 0);
             } else {
                 try self.ai_controller.controlleds.append(self.allocator, .init(animal));
+                animal.pos = .init(padding, padding);
             }
-            animal.pos = .init(padding, padding);
-            padding += 30;
+            padding += 60;
         }
     }
 
@@ -221,6 +260,15 @@ const Game = struct {
         self.ai_controller.update(dt);
         var update_iter = self.animals.valueIterator();
         while (update_iter.next()) |animal| {
+            var others = self.animals.valueIterator();
+
+            animal.is_colliding = false;
+            while (others.next()) |other| {
+                if (animal.check_collision(other)) {
+                    animal.is_colliding = true;
+                    break;
+                }
+            }
             animal.update(dt);
         }
     }
@@ -228,6 +276,8 @@ const Game = struct {
     pub fn render(self: *Game) void {
         var render_iter = self.animals.valueIterator();
         while (render_iter.next()) |animal| {
+            if (self.debug) rl.drawRectangleRec(animal.sprite.get_target_rect(animal.pos.sub(animal.sprite.get_origin())), .white);
+            if (self.debug) rl.drawCircleV(animal.pos.to_rl(), animal.sprite.get_collision_rad(), .green);
             animal.render();
         }
     }
@@ -278,6 +328,8 @@ pub fn main(init: std.process.Init) anyerror!void {
 
     while (!rl.windowShouldClose()) {
         game.update(rl.getFrameTime());
+
+        if (rl.isKeyPressed(.h)) game.debug = !game.debug;
 
         rl.beginDrawing();
         defer rl.endDrawing();
