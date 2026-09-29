@@ -65,6 +65,14 @@ pub fn build(b: *std.Build) !void {
             run_cmd.addArgs(args);
         }
 
+        const exe_check = b.addExecutable(.{
+            .name = "olc-check",
+            .root_module = exe_mod,
+        });
+
+        const check_step = b.step("check", "Check that the app compiles");
+        check_step.dependOn(&exe_check.step);
+
         const exe_tests = b.addTest(.{
             .root_module = exe.root_module,
         });
