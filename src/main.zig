@@ -96,9 +96,9 @@ const Sprite = struct {
 };
 
 const AnimalProperties = struct {
-    max_speed: f32 = 20,
-    acc: f32 = 20,
-    deacc: f32 = 22,
+    max_speed: f32 = 150,
+    acc: f32 = 600,
+    deacc: f32 = 800,
 };
 
 const Animal = struct {
@@ -113,8 +113,13 @@ const Animal = struct {
     is_colliding: bool = false,
     is_player_controlled: bool = false,
 
-    pub fn init(kind: AnimalKind, id: i32, sheet: *SpriteSheet) !Animal {
-        return .{ .kind = kind, .id = id, .sprite = .init(try sheet.get_rect(kind), sheet) };
+    pub fn init(kind: AnimalKind, id: i32, sheet: *SpriteSheet, props: AnimalProperties) !Animal {
+        return .{
+            .kind = kind,
+            .id = id,
+            .sprite = .init(try sheet.get_rect(kind), sheet),
+            .props = props,
+        };
     }
 
     pub fn update(self: *Animal, dt: f32) void {
@@ -297,7 +302,7 @@ const Game = struct {
 
     pub fn spawn(self: *Game, kind: AnimalKind) !i32 {
         const curr_id = self._gen_id();
-        try self.animals.put(curr_id, try .init(kind, curr_id, &self.spritesheet));
+        try self.animals.put(curr_id, try .init(kind, curr_id, &self.spritesheet, .{ .max_speed = self.random.float(f32) * 300 }));
         return curr_id;
     }
 
@@ -309,10 +314,10 @@ const Game = struct {
 pub fn main(init: std.process.Init) anyerror!void {
     const allocator = init.gpa;
 
-    const screenWidth = 800;
-    const screenHeight = 600;
+    const screen_width = 800;
+    const screen_height = 600;
 
-    rl.initWindow(screenWidth, screenHeight, "Animal Framing");
+    rl.initWindow(screen_width, screen_height, "Animal Framing");
     defer rl.closeWindow();
 
     rl.setTargetFPS(60);
@@ -325,10 +330,25 @@ pub fn main(init: std.process.Init) anyerror!void {
     defer game.deinit();
 
     try game.start();
+    var cam = rl.Camera2D{
+        .offset = .{ .x = screen_width / 2.0, .y = screen_height / 2.0 },
+        .target = .{ .x = 0, .y = 0 },
+        .rotation = 0,
+        .zoom = 1.0,
+    };
+
+    const bg_img = rl.genImageChecked(screen_width, screen_height, 25, 25, .dark_gray, .ray_white);
+    defer rl.unloadImage(bg_img);
+    const bg_text = try rl.loadTextureFromImage(bg_img);
+    defer rl.unloadTexture(bg_text);
+    rl.setTextureWrap(bg_text, .repeat);
 
     while (!rl.windowShouldClose()) {
-        game.update(rl.getFrameTime());
+        const dt = rl.getFrameTime();
+        game.update(dt);
+        cam.target = game.player.animal.pos.to_rl();
 
+        if (rl.isKeyPressed(.c)) cam.target = game.player.animal.pos.to_rl();
         if (rl.isKeyPressed(.h)) game.debug = !game.debug;
 
         rl.beginDrawing();
@@ -336,6 +356,12 @@ pub fn main(init: std.process.Init) anyerror!void {
 
         rl.clearBackground(.blue);
 
+        const dest = rl.Rectangle{ .x = 0, .y = 0, .width = @floatFromInt(screen_width), .height = @floatFromInt(screen_height) };
+        const source = rl.Rectangle{ .x = cam.target.x * 0.9, .y = cam.target.y * 0.9, .width = @floatFromInt(screen_width), .height = @floatFromInt(screen_height) };
+        rl.drawTexturePro(bg_text, source, dest, .zero(), 0, .white);
+
+        rl.beginMode2D(cam);
         game.render();
+        rl.endMode2D();
     }
 }
