@@ -1,5 +1,6 @@
 const std = @import("std");
 const rl = @import("raylib");
+const rg = @import("raygui");
 const loader = @import("loader.zig");
 const common = @import("common.zig");
 
@@ -7,6 +8,8 @@ const Vec2 = common.Vec2;
 
 const SPREADSHEET_PATH = "assets/round.png";
 const SPREADSHEET_DESC_PATH = "assets/round.xml";
+
+const CHANGE_TIME_INTERVAL: f32 = 10;
 
 const AnimalKind = enum { bear, buffalo, chick, chicken, cow, crocodile, dog, duck, elephant, frog, giraffe, goat, gorilla, hippo, horse, monkey, moose, narwhal, owl, panda, parrot, penguin, pig, rabbit, rhino, sloth, snake, walrus, whale, zebra };
 const SpriteSheet = struct {
@@ -57,7 +60,8 @@ const Sprite = struct {
     source_sheet: *SpriteSheet,
     _collision_rad: f32,
 
-    pub fn init(rect: rl.Rectangle, source: *SpriteSheet) Sprite {
+    pub fn init(kind: AnimalKind, source: *SpriteSheet) !Sprite {
+        const rect = try source.get_rect(kind);
         return .{
             .rect = rect,
             .source_sheet = source,
@@ -117,9 +121,14 @@ const Animal = struct {
         return .{
             .kind = kind,
             .id = id,
-            .sprite = .init(try sheet.get_rect(kind), sheet),
+            .sprite = try .init(kind, sheet),
             .props = props,
         };
+    }
+
+    pub fn set_kind(self: *Animal, kind: AnimalKind) !void {
+        self.kind = kind;
+        self.sprite = try .init(kind, self.sprite.source_sheet);
     }
 
     pub fn update(self: *Animal, dt: f32) void {
@@ -226,6 +235,7 @@ const Game = struct {
     player: PlayerController,
     ai_controller: AIController,
     debug: bool = false,
+    _change_timer: f32 = 3,
 
     pub fn load(allocator: std.mem.Allocator, io: std.Io, rand: std.Random) !Game {
         return .{
@@ -260,7 +270,7 @@ const Game = struct {
         }
     }
 
-    pub fn update(self: *Game, dt: f32) void {
+    pub fn update(self: *Game, dt: f32) !void {
         self.player.update();
         self.ai_controller.update(dt);
         var update_iter = self.animals.valueIterator();
@@ -275,6 +285,18 @@ const Game = struct {
                 }
             }
             animal.update(dt);
+        }
+
+        self._change_timer += dt;
+
+        if (self._change_timer > CHANGE_TIME_INTERVAL) {
+            self._change_timer = 0;
+            var change_iter = self.animals.valueIterator();
+            const count = @typeInfo(AnimalKind).@"enum".fields.len;
+            while (change_iter.next()) |animal| {
+                const index = self.random.uintLessThan(usize, count);
+                try animal.set_kind(@enumFromInt(index));
+            }
         }
     }
 
@@ -302,7 +324,7 @@ const Game = struct {
 
     pub fn spawn(self: *Game, kind: AnimalKind) !i32 {
         const curr_id = self._gen_id();
-        try self.animals.put(curr_id, try .init(kind, curr_id, &self.spritesheet, .{ .max_speed = self.random.float(f32) * 300 }));
+        try self.animals.put(curr_id, try .init(kind, curr_id, &self.spritesheet, .{ .max_speed = 100 + self.random.float(f32) * 200 }));
         return curr_id;
     }
 
@@ -345,7 +367,7 @@ pub fn main(init: std.process.Init) anyerror!void {
 
     while (!rl.windowShouldClose()) {
         const dt = rl.getFrameTime();
-        game.update(dt);
+        try game.update(dt);
         cam.target = game.player.animal.pos.to_rl();
 
         if (rl.isKeyPressed(.c)) cam.target = game.player.animal.pos.to_rl();
@@ -363,5 +385,35 @@ pub fn main(init: std.process.Init) anyerror!void {
         rl.beginMode2D(cam);
         game.render();
         rl.endMode2D();
+
+        draw_change_timer(.init(0, 10, screen_width, 100), game._change_timer);
     }
+}
+
+pub fn draw_change_timer(bounds: rl.Rectangle, time: f32) void {
+    rg.setStyle(.label, .text_color_normal, rl.colorToInt(.black));
+
+    var buf: [64]u8 = undefined;
+
+    const text = std.fmt.bufPrintZ(
+        &buf,
+        "TIME: {d}",
+        .{CHANGE_TIME_INTERVAL - @floor(time)},
+    ) catch unreachable;
+
+    _ = rg.label(
+        .{
+            .x = bounds.x + 2,
+            .y = bounds.y + 2,
+            .width = bounds.width,
+            .height = bounds.height,
+        },
+        text,
+    );
+
+    rg.setStyle(.label, .text_alignment, @intFromEnum(rg.TextAlignment.center));
+    rg.setStyle(.label, .text_color_normal, rl.colorToInt(.init(124, 255, 0, 255)));
+    rg.setStyle(.default, .text_size, 48);
+
+    _ = rg.label(bounds, text);
 }
