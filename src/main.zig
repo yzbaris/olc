@@ -106,6 +106,29 @@ const AnimalProperties = struct {
     deacc: f32 = 800,
 };
 
+const MagnetWeapon = struct {
+    is_pulling: bool = true,
+    radius: f32 = 100,
+    base_cd: f32 = 5,
+    curr_cd: f32 = 0,
+
+    pub fn update(self: *MagnetWeapon, dt: f32) void {
+        if (self.curr_cd > 0) self.curr_cd = @max(0, self.curr_cd - dt);
+    }
+
+    pub fn fire(self: *MagnetWeapon) void {
+        if (self.curr_cd > 0) return;
+
+        self.curr_cd = self.base_cd;
+    }
+
+    pub fn render(self: *MagnetWeapon, pos: Vec2) void {
+        const ratio = ((self.base_cd - self.curr_cd) / self.base_cd);
+        rl.drawCircleV(pos.to_rl(), self.radius * ratio, .init(25, 88, @trunc(220 * ratio), 120));
+        rl.drawCircleLinesV(pos.to_rl(), self.radius * ratio, .blue);
+    }
+};
+
 const Animal = struct {
     id: i32,
     kind: AnimalKind,
@@ -117,6 +140,7 @@ const Animal = struct {
     props: AnimalProperties = .{},
     is_colliding: bool = false,
     is_player_controlled: bool = false,
+    weapon: MagnetWeapon = .{},
 
     pub fn init(kind: AnimalKind, id: i32, sheet: *SpriteSheet, props: AnimalProperties) !Animal {
         return .{
@@ -147,9 +171,12 @@ const Animal = struct {
         } else {
             self.pos = next_pos;
         }
+
+        self.weapon.update(dt);
     }
 
     pub fn render(self: *Animal) void {
+        self.weapon.render(self.pos);
         self.sprite.render(self.pos);
     }
 
@@ -193,6 +220,10 @@ const PlayerController = struct {
         }
         if (rl.isKeyDown(.d)) {
             move_dir.addx(1);
+        }
+
+        if (rl.isKeyDown(.space)) {
+            self.animal.weapon.fire();
         }
 
         self.animal.dir = move_dir.normalized();
