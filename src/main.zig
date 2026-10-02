@@ -10,6 +10,7 @@ const SPREADSHEET_PATH = "assets/round.png";
 const SPREADSHEET_DESC_PATH = "assets/round.xml";
 
 const CHANGE_TIME_INTERVAL: f32 = 10;
+const WORLD_BORDER = 1000;
 
 const AnimalKind = enum { bear, buffalo, chick, chicken, cow, crocodile, dog, duck, elephant, frog, giraffe, goat, gorilla, hippo, horse, monkey, moose, narwhal, owl, panda, parrot, penguin, pig, rabbit, rhino, sloth, snake, walrus, whale, zebra };
 const SpriteSheet = struct {
@@ -139,7 +140,13 @@ const Animal = struct {
         } else {
             self.velocity = Vec2.move_toward(self.velocity, self.dir.scale(self.props.max_speed), self.props.acc * dt);
         }
-        self.pos = self.pos.add(self.velocity.scale(dt));
+
+        const next_pos = self.pos.add(self.velocity.scale(dt));
+        if (test_world_border(next_pos)) {
+            self.velocity = .zero();
+        } else {
+            self.pos = next_pos;
+        }
     }
 
     pub fn render(self: *Animal) void {
@@ -216,7 +223,7 @@ const AIController = struct {
     pub fn update(self: *AIController, _: f32) void {
         const curr_time = rl.getTime();
         for (self.controlleds.items) |*controlled| {
-            if (controlled.animal.is_colliding or curr_time >= controlled._next_check_time) {
+            if (controlled.animal.is_colliding or curr_time >= controlled._next_check_time or controlled.animal.velocity.is_zero()) {
                 const dirx: f32 = @floatFromInt(self.rand.intRangeAtMost(i32, -1, 1));
                 const diry: f32 = @floatFromInt(self.rand.intRangeAtMost(i32, -1, 1));
                 controlled.animal.dir = .init(dirx, diry);
@@ -416,4 +423,8 @@ pub fn draw_change_timer(bounds: rl.Rectangle, time: f32) void {
     rg.setStyle(.default, .text_size, 48);
 
     _ = rg.label(bounds, text);
+}
+
+pub fn test_world_border(pos: Vec2) bool {
+    return !(pos.x > -WORLD_BORDER and pos.x < WORLD_BORDER and pos.y > -WORLD_BORDER and pos.y < WORLD_BORDER);
 }
